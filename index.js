@@ -1,11 +1,17 @@
-  const express = require('express')
-const app = express()
-const port = process.env.PORT || 3000
+const express = require("express");
+const cors = require("cors");
+const app = express();
+require("dotenv").config();
+const port = process.env.PORT || 3000;
 
-app.get('/', (req, res) => {
-  res.send('Zap is Shifting shifting')
-})
+// middleware
+app.use(express.json);
+app.use(cors());
+
+app.get("/", (req, res) => {
+  res.send("Zap is Shifting shifting");
+});
 
 app.listen(port, () => {
-  console.log(`Example app listening on port ${port}`)
-})
+  console.log(`Example app listening on port ${port}`);
+});
