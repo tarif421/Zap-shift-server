@@ -48,6 +48,14 @@ async function run() {
       res.send(result);
     });
 
+    //  to get parcel information
+    app.get("/parcels/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await parcelCollection.findOne(query);
+      res.send(result);
+    });
+
     app.post("/parcels", async (req, res) => {
       const parcel = req.body;
       // parcel created time
@@ -58,14 +66,13 @@ async function run() {
     });
 
     //  parcels delete
-    app.delete("/parcels/:id",
-      async (req, res) => {
-        const id = req.params.id;
-        const query = { _id: new ObjectId(id) };
+    app.delete("/parcels/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
 
-        const result = await parcelCollection.deleteOne(query);
-        res.send(result);
-      });
+      const result = await parcelCollection.deleteOne(query);
+      res.send(result);
+    });
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
