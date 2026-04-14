@@ -76,28 +76,63 @@ async function run() {
       res.send(result);
     });
 
-    // payment related apis
-    app.post("/create-checkout-session", async (req, res) => {
+    ///////////  payment related api//////////////
+    app.post("/payment-checkout-session", async (req, res) => {
       const paymentInfo = req.body;
-
+      const amount = parseInt(paymentInfo.cost) * 100;
       const session = await stripe.checkout.sessions.create({
         line_items: [
           {
-            // Provide the exact Price ID (for example, price_1234) of the product you want to sell
             price_data: {
-              currency: 'USD',
-              unit_amount: 1500,
-              product_data:{
-                name: parcelInfo.parcelName
-              }
+              currency: "usd",
+              unit_amount: amount,
+              product_data: {
+                name: `Please pay for: ${paymentInfo.parcelName}`,
+              },
             },
             quantity: 1,
           },
         ],
         mode: "payment",
-        return_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success}`,
+        metadata: {
+          parcelId: paymentInfo.parcelId,
+        },
+        customer_email: paymentInfo.senderEmail,
+        success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session|_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
       });
+      res.send({ url: session.url });
     });
+
+    // old payment related apis
+    // app.post("/create-checkout-session", async (req, res) => {
+    //   const paymentInfo = req.body;
+    //   const amount = parseInt(paymentInfo.cost) * 100;
+
+    //   const session = await stripe.checkout.sessions.create({
+    //     line_items: [
+    //       {
+    //         // Provide the exact Price ID (for example, price_1234) of the product you want to sell
+    //         price_data: {
+    //           currency: "usd",
+    //           unit_amount: amount,
+    //           product_data: {
+    //             name: paymentInfo.parcelName,
+    //           },
+    //         },
+    //         quantity: 1,
+    //       },
+    //     ],
+    //     mode: "payment",
+    //     metadata: {
+    //       parcelId: paymentInfo.parcelId,
+    //     },
+    //     success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success`,
+    //     cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
+    //   });
+    //   console.log(session);
+    //   res.send({ url: session.url });
+    // });
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
