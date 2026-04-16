@@ -11,6 +11,13 @@ const stripe = require("stripe")(process.env.STRIPE_SECRET);
 
 const port = process.env.PORT || 3000;
 
+const generateTrackingId = () => {
+  const prefix = "TRK";
+  const timestamp = Date.now().toString().slice(-6); // Last 6 digits of current time
+  const randomStr = Math.random().toString(36).substring(2, 7).toUpperCase();
+  return `${prefix}-${timestamp}-${randomStr}`;
+};
+
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.9aos02c.mongodb.net/?appName=Cluster0`;
 
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
@@ -141,12 +148,14 @@ async function run() {
 
       const session = await stripe.checkout.sessions.retrieve(sessionId);
       console.log("session retrieve", session);
+
       if (session.payment_status === "paid") {
         const id = session.metadata.parcelId;
         const query = { _id: new ObjectId(id) };
         const update = {
           $set: {
             paymentStatus: "paid",
+            trackingId: generateTrackingId(),
           },
         };
         const result = await parcelCollection.updateOne(query, update);
@@ -158,7 +167,6 @@ async function run() {
           parcelName: session.metadata.parcelName,
           transactionId: session.payment_status,
           paidAt: new Date(),
-          trackingId: "",
         };
         if (session.payment_status === "paid") {
           const resultPayment = await paymentCollection.insertOne(payment);
