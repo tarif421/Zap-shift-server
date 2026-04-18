@@ -16,7 +16,7 @@ const admin = require("firebase-admin");
 const serviceAccount = require("./zap-shift-cbd1a-firebase-adminsdk.json");
 
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
+  credential: admin.credential.cert(serviceAccount),
 });
 
 const generateTrackingId = () => {
@@ -41,14 +41,25 @@ const client = new MongoClient(uri, {
 app.use(express.json());
 app.use(cors());
 
-const verifyFBToken = (req, res, next) => {
-  console.log("headers in the middleware ", req.headers.authorization);
+const verifyFBToken = async (req, res, next) => {
+  // console.log("headers in the middleware ", req.headers.authorization);
   const token = req.headers.authorization;
 
-  if(!token){
-    return res.status(401).send({messag: 'unathorized access'})
+  if (!token) {
+    return res.status(401).send({ messag: "unathorized access" });
   }
-  next();
+
+  try {
+    const idToken = token.split(" ")[1];
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    console.log("Decoded in the token", decoded);
+    req.decoded_email = decoded.email;
+    next();
+  } catch (error) {
+    console.error("Firebase Auth Error:", error.message);
+   
+    return res.status(401).send({ message: "forbidden access" });
+  }
 };
 
 async function run() {
@@ -77,14 +88,14 @@ async function run() {
     });
 
     //  to get parcel information
-    app.get("/parcels/:id", async (req, res) => {
+    app.get("/parcels/:id", verifyFBToken, async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       const result = await parcelCollection.findOne(query);
       res.send(result);
     });
 
-    app.post("/parcels", async (req, res) => {
+    app.post("/parcels", verifyFBToken, async (req, res) => {
       const parcel = req.body;
       // parcel created time
       parcel.createdAt = new Date();
@@ -205,7 +216,7 @@ async function run() {
         };
         if (session.payment_status === "paid") {
           const resultPayment = await paymentCollection.insertOne(payment);
-          res.send({
+          return res.send({
             success: true,
             modifyParcel: result,
             trackingId: trackingId,
@@ -215,7 +226,7 @@ async function run() {
         }
       }
 
-      res.send({ success: false });
+      return res.send({ success: false });
     });
 
     //  payment related apis
@@ -228,6 +239,10 @@ async function run() {
 
       if (email) {
         query.customerEmail = email;
+        //  check email address
+        if (email !== req.decoded_email) {
+          return res.status(403).send({ message: "forbidded access" });
+        }
       }
       const cursor = paymentCollection.find(query);
       const result = await cursor.toArray();
