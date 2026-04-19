@@ -57,7 +57,7 @@ const verifyFBToken = async (req, res, next) => {
     next();
   } catch (error) {
     console.error("Firebase Auth Error:", error.message);
-   
+
     return res.status(401).send({ message: "forbidden access" });
   }
 };
@@ -70,6 +70,17 @@ async function run() {
     const db = client.db("zap_shift_db");
     const parcelCollection = db.collection("parcels");
     const paymentCollection = db.collection("payments");
+    const userCollection = db.collection("users");
+
+    // users related api
+    app.post("/user", async (req, res) => {
+      const user = req.body;
+      user.role = "user";
+      user.createdAt = new Date();
+
+      const result = await userCollection.insertOne(user);
+      res.send(result);
+    });
 
     // parcel api
     app.get("/parcels", async (req, res) => {
@@ -180,7 +191,9 @@ async function run() {
       const transactionId = session.payment_intent;
       const query = { transactionId: transactionId };
 
-      const paymentExist = await paymentCollection.findOne(query);
+      const paymentExist = await paymentCollection
+        .findOne(query)
+        .sort({ paidAt: 1 });
       console.log(paymentExist);
 
       if (paymentExist) {
@@ -244,7 +257,7 @@ async function run() {
           return res.status(403).send({ message: "forbidded access" });
         }
       }
-      const cursor = paymentCollection.find(query);
+      const cursor = paymentCollection.find(query).sort({ paidAt: 1 });
       const result = await cursor.toArray();
       res.send(result);
     });
