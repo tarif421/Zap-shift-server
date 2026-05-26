@@ -88,14 +88,17 @@ async function run() {
     });
 
     // parcel api
-    app.get("/parcels", async (req, res) => {
+    app.get("/parcels", verifyFBToken, async (req, res) => {
       const query = {};
       const { email } = req.query;
       // parcels?email= '&
       if (email) {
         query.senderEmail = email;
       }
-
+      //  check email address
+      if (email !== req.decoded_email) {
+        return res.status(403).send({ message: "forbidden access" });
+      }
       const options = { sort: { createdAt: -1 } };
 
       const cursor = parcelCollection.find(query, options);
@@ -274,12 +277,7 @@ async function run() {
       const result = await paymentCollection.deleteOne(query);
       res.send(result);
     });
-    // app.delete("/all-orders/:id", async (req, res) => {
-    //   const id = req.params.id;
-    //   const query = { _id: new ObjectId(id) };
-    //   const result = await orderCollection.deleteOne(query);
-    //   res.send(result);
-    // });
+
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
