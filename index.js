@@ -109,25 +109,33 @@ async function run() {
     //  payment related apis
     app.post("/create-cheackout-seassion", async (req, res) => {
       const paymentInfo = req.body;
+      const amount = parseInt(paymentInfo.cost) * 100
       const session = await stripe.checkout.sessions.create({
         line_items: [
           {
-            // Provide the exact Price ID (for example, price_1234) of the product you want to sell
+           
             price_data: {
-              currency: 'usd',
-              unit_amount: 1500,
+              currency: "usd",
+              unit_amount: amount,
               product_data: {
-                name: paymentInfo.parcelInfo.parcelName
-              }
+                name: paymentInfo.parcelInfo.parcelName,
+              },
             },
-        
+
             quantity: 1,
           },
         ],
-            customer_email: paymentInfo.senderEmail,
+        customer_email: paymentInfo.senderEmail,
         mode: "payment",
+        metadata: {
+          parcelId: paymentInfo.parcelId,
+        },
         success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success`,
+        cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
       });
+
+      console.log(session)
+      res.send({url: session.url})
     });
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
