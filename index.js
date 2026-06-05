@@ -18,12 +18,14 @@ admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
 
-const generateTrackingId = () => {
-  const prefix = "TRK";
-  const timestamp = Date.now().toString().slice(-6); // Last 6 digits of current time
-  const randomStr = Math.random().toString(36).substring(2, 7).toUpperCase();
-  return `${prefix}-${timestamp}-${randomStr}`;
-};
+//  tracking id
+const crypto = require("crypto");
+
+function generateTrackingId() {
+  const randomSet = crypto.randomBytes(3).toString("hex").toUpperCase();
+  const currentYear = new Date().getFullYear(); // 2026
+  return `ZAP-${currentYear}-${randomSet}`;
+}
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.9aos02c.mongodb.net/?appName=Cluster0`;
 
@@ -128,6 +130,7 @@ async function run() {
         mode: "payment",
         metadata: {
           parcelId: paymentInfo.parcelId,
+          parcelName: paymentInfo.parcelName,
         },
         success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
@@ -141,18 +144,43 @@ async function run() {
       // console.log(" session id", sessionId);
       const session = await stripe.checkout.sessions.retrieve(sessionId);
       // console.log('session retrieve', session)
+      
+    const trackingId = generateTrackingId()
+
       if (session.payment_status === "paid") {
         const id = session.metadata.parcelId;
         const query = { _id: new ObjectId(id) };
         const update = {
           $set: {
             paymentStatus: "paid",
+            trackingId: trackingId,
           },
         };
         const result = await parcelCollection.updateOne(query, update);
-        res.send(result);
+
+        const payment = {
+          amount: session.amount_total / 100,
+          currency: session.currency,
+          customerEmail: session.customer_email,
+          parcelId: session.metadata.parcelId,
+          parcelName: session.metadata.parcelName,
+          transactionId: session.payment_intent,
+          paymentStatus: session.payment_status,
+          paymentDate: new Date(),
+        };
+
+        if (session.payment_status === "paid") {
+          const resultPayment = await paymentCollection.insertOne(payment);
+          return res.send({
+            success: true,
+            modifyParcel: result,
+            trackingId: trackingId,
+            paymentInfo: resultPayment,
+              transactionId: session.payment_intent
+          });
+        }
       }
-      res.send({ success: false });
+      return res.send({ success: false, message: "Payment not verified" });
     });
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
