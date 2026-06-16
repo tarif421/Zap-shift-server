@@ -72,7 +72,15 @@ async function run() {
     const parcelCollection = db.collection("parcels");
     const paymentCollection = db.collection("payments");
     const userCollection = db.collection("users");
+    //  user related apis
+    app.post("/users", async (req, res) => {
+      const user = req.body;
+      user.role = "user";
+      user.createdAt = new Date();
 
+      const result = await userCollection.insertOne(user);
+      res.send(result);
+    });
     // parcel api
     app.get("/parcels", async (req, res) => {
       const query = {};
@@ -195,6 +203,18 @@ async function run() {
         }
       }
       return res.send({ success: false, message: "Payment not verified" });
+    });
+
+    //  payment history by email
+    app.get("/payments", async (req, res) => {
+      const email = req.query.email;
+      const query = {};
+      if (email) {
+        query.customerEmail = email;
+      }
+      const cursor = paymentCollection.find(query);
+      const result = await cursor.toArray();
+      res.send(result);
     });
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
