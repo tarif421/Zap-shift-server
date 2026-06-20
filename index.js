@@ -72,11 +72,19 @@ async function run() {
     const parcelCollection = db.collection("parcels");
     const paymentCollection = db.collection("payments");
     const userCollection = db.collection("users");
+    const ridersCollection = db.collection("riders");
     //  user related apis
     app.post("/users", async (req, res) => {
       const user = req.body;
+
       user.role = "user";
       user.createdAt = new Date();
+      const email = user.email;
+      const userExists = await userCollection.findOne({ email });
+
+      if (userExists) {
+        return res.send({ message: "user exists" });
+      }
 
       const result = await userCollection.insertOne(user);
       res.send(result);
@@ -214,6 +222,24 @@ async function run() {
       }
       const cursor = paymentCollection.find(query);
       const result = await cursor.toArray();
+      res.send(result);
+    });
+    //  riders related api
+    app.get("riders", async (req, res) => {
+      const query = {};
+      if (req.query.status) {
+        query.status = req.query.status;
+      }
+      const cursor = ridersCollection.find(qury);
+      const result = await cursor.toArray();
+      res.send(result);
+    });
+    app.post("/riders", async (req, res) => {
+      const rider = req.body;
+      rider.status = "pendig";
+      rider.createdAt = new Date();
+
+      const result = await ridersCollection.insertOne(rider);
       res.send(result);
     });
     // Send a ping to confirm a successful connection
