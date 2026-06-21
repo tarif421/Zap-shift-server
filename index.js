@@ -225,21 +225,41 @@ async function run() {
       res.send(result);
     });
     //  riders related api
-    app.get("riders", async (req, res) => {
+    app.get("/riders", async (req, res) => {
       const query = {};
       if (req.query.status) {
         query.status = req.query.status;
       }
-      const cursor = ridersCollection.find(qury);
+      const cursor = ridersCollection.find(query);
       const result = await cursor.toArray();
       res.send(result);
     });
     app.post("/riders", async (req, res) => {
       const rider = req.body;
-      rider.status = "pendig";
+      const email = rider.email;
+
+      const riderExists = await ridersCollection.findOne({ email });
+
+      if (riderExists) {
+        return res.send({ message: "already applied" });
+      }
+
+      rider.satus = "pending";
       rider.createdAt = new Date();
 
       const result = await ridersCollection.insertOne(rider);
+      res.send(result);
+    });
+    app.patch("/riders/:id", async (req, res) => {
+      const status = req.body.status;
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const updateDoc = {
+        $set: {
+          status: status,
+        },
+      };
+      const result = await ridersCollection.updateOne(query, updateDoc);
       res.send(result);
     });
     // Send a ping to confirm a successful connection
