@@ -74,7 +74,12 @@ async function run() {
     const userCollection = db.collection("users");
     const ridersCollection = db.collection("riders");
     //  user related apis
-    app.post("/users", async (req, res) => {
+    app.get("/users", async (req, res) => {
+      const cursor = userCollection.find();
+      const result = await cursor.toArray();
+      res.send(result);
+    });
+    app.post("/users", verifyFBToken, async (req, res) => {
       const user = req.body;
 
       user.role = "user";
@@ -260,6 +265,18 @@ async function run() {
         },
       };
       const result = await ridersCollection.updateOne(query, updateDoc);
+
+      if (status === "approved") {
+        const email = req.body.email;
+        const useQuery = { email };
+        const updateUser = {
+          $set: {
+            role: "rider",
+          },
+        };
+        const userResult = await userCollection.updateOne(useQuery, updateUser);
+      }
+
       res.send(result);
     });
     // Send a ping to confirm a successful connection
