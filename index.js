@@ -147,6 +147,20 @@ async function run() {
       const result = await cursor.toArray();
       res.send(result);
     });
+    app.get("/parcels/rider", async (req, res) => {
+      const { riderEmail, deliveryStatus } = req.query;
+      const query = {};
+      if (riderEmail) {
+        query.riderEmail = riderEmail;
+      }
+      if (deliveryStatus) {
+        // query.deliveryStatus = {$in: ['driver_assign', 'rider_arriving']}
+        query.deliveryStatus = {$nin: ['parcel_delivered']}
+      }
+      const cursor = parcelCollection.find(query);
+      const result = await cursor.toArray();
+      res.send(result);
+    });
     app.get("/parcels/:id", async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
@@ -160,6 +174,47 @@ async function run() {
       const result = await parcelCollection.insertOne(parcel);
       res.send(result);
     });
+    // TODO: rename this to be specific like /parcels/:id/assign
+    app.patch("/parcels/:id", async (req, res) => {
+      const id = req.params.id;
+      const { riderId, riderName, riderEmail } = req.body;
+
+      const query = { _id: new ObjectId(id) };
+
+      const updatedDoc = {
+        $set: {
+          deliveryStatus: "driver_assign",
+          riderId: riderId,
+          riderName: riderName,
+          riderEmail: riderEmail,
+        },
+      };
+      const result = await parcelCollection.updateOne(query, updatedDoc);
+      // update rider information
+      const riderQuery = { _id: new ObjectId(riderId) };
+      const riderUpdatedDoc = {
+        $set: {
+          workStatus: "in_delivery",
+        },
+      };
+      const riderResult = await ridersCollection.updateOne(
+        riderQuery,
+        riderUpdatedDoc,
+      );
+      res.send(riderResult);
+    });
+    app.patch("/parcels/:id/status", async (req, res) => {
+      const { deliveryStatus } = req.body;
+      const query = { _id: new ObjectId(req.params.id) };
+      const updateDoc = {
+        $set: {
+          deliveryStatus: deliveryStatus,
+        },
+      };
+      const result = await parcelCollection.updateOne(query, updateDoc);
+      res.send(result);
+    });
+
     app.patch(
       "/users/:id/role",
       verifyFBToken,
@@ -289,9 +344,16 @@ async function run() {
     });
     //  riders related api
     app.get("/riders", async (req, res) => {
+      const { status, districts, workStatus } = req.query;
       const query = {};
-      if (req.query.status) {
-        query.status = req.query.status;
+      if (status) {
+        query.status = status;
+      }
+      if (districts) {
+        query.districts = districts;
+      }
+      if (workStatus) {
+        query.workStatus = workStatus;
       }
       const cursor = ridersCollection.find(query);
       const result = await cursor.toArray();
@@ -325,6 +387,7 @@ async function run() {
         const updateDoc = {
           $set: {
             status: status,
+            workStatus: "available",
           },
         };
         const result = await ridersCollection.updateOne(query, updateDoc);
