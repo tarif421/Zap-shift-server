@@ -20,6 +20,7 @@ admin.initializeApp({
 
 //  tracking id
 const crypto = require("crypto");
+const { log } = require("console");
 
 function generateTrackingId() {
   const randomSet = crypto.randomBytes(3).toString("hex").toUpperCase();
@@ -73,6 +74,7 @@ async function run() {
     const paymentCollection = db.collection("payments");
     const userCollection = db.collection("users");
     const ridersCollection = db.collection("riders");
+    const trackingCollection = db.collection("trackings");
 
     // middleware admin before allowing admin activity
     //  must be used after verigyfbtoken
@@ -86,6 +88,23 @@ async function run() {
       }
       next();
     };
+    // tracking
+    const logTracking = async (trackingId, status) => {
+      try {
+        const log = {
+          trackingId,
+          status,
+          details: status.split("_").join(" "),
+          createdAt: new Date(),
+        };
+
+        const result = await trackingCollection.insertOne(log);
+        return result;
+      } catch (error) {
+        console.error("Tracking log error:", error);
+      }
+    };
+
     //  user related apis
     app.get("/users", async (req, res) => {
       // search
@@ -150,13 +169,17 @@ async function run() {
     app.get("/parcels/rider", async (req, res) => {
       const { riderEmail, deliveryStatus } = req.query;
       const query = {};
+
       if (riderEmail) {
         query.riderEmail = riderEmail;
       }
+
       if (deliveryStatus) {
-        // query.deliveryStatus = {$in: ['driver_assign', 'rider_arriving']}
-        query.deliveryStatus = {$nin: ['parcel_delivered']}
+        query.deliveryStatus = deliveryStatus;
+      } else {
+        query.deliveryStatus = { $nin: ["parcel_delivered", "rejected"] };
       }
+
       const cursor = parcelCollection.find(query);
       const result = await cursor.toArray();
       res.send(result);
@@ -174,12 +197,17 @@ async function run() {
       const result = await parcelCollection.insertOne(parcel);
       res.send(result);
     });
-    // TODO: rename this to be specific like /parcels/:id/assign
+    
+    // Admin Assign Rider Route
     app.patch("/parcels/:id", async (req, res) => {
       const id = req.params.id;
-      const { riderId, riderName, riderEmail } = req.body;
+      const { riderId, riderName, riderEmail, trackingId } = req.body;
 
       const query = { _id: new ObjectId(id) };
+
+      
+      const parcel = await parcelCollection.findOne(query);
+      const activeTrackingId = trackingId || parcel?.trackingId;
 
       const updatedDoc = {
         $set: {
@@ -190,49 +218,143 @@ async function run() {
         },
       };
       const result = await parcelCollection.updateOne(query, updatedDoc);
-      // update rider information
+
+      // rider status update
       const riderQuery = { _id: new ObjectId(riderId) };
       const riderUpdatedDoc = {
         $set: {
           workStatus: "in_delivery",
         },
       };
-      const riderResult = await ridersCollection.updateOne(
-        riderQuery,
-        riderUpdatedDoc,
-      );
-      res.send(riderResult);
+      await ridersCollection.updateOne(riderQuery, riderUpdatedDoc);
+
+      // tracking log saived
+      if (activeTrackingId) {
+        await logTracking(activeTrackingId, "driver_assign");
+      }
+
+      res.send(result);
     });
-    app.patch("/parcels/:id/status", async (req, res) => {
-      const { deliveryStatus } = req.body;
-      const query = { _id: new ObjectId(req.params.id) };
-      const updateDoc = {
-        $set: {
-          deliveryStatus: deliveryStatus,
-        },
-      };
-      const result = await parcelCollection.updateOne(query, updateDoc);
+    // app.patch("/parcels/:id/status", async (req, res) => {
+    //   const { deliveryStatus, riderId } = req.body;
+    //   const query = { _id: new ObjectId(req.params.id) };
+    //   const updateDoc = {
+    //     $set: {
+    //       deliveryStatus: deliveryStatus,
+    //     },
+    //   };
+    //   if (deliveryStatus === "parcel_delivered") {
+    //     // update rider information
+    //     const riderQuery = { _id: new ObjectId(riderId) };
+    //     const riderUpdatedDoc = {
+    //       $set: {
+    //         workStatus: "available",
+    //       },
+    //     };
+    //     const riderResult = await ridersCollection.updateOne(
+    //       riderQuery,
+    //       riderUpdatedDoc,
+    //     );
+    //   }
+
+    //   const result = await parcelCollection.updateOne(query, updateDoc);
+    //   res.send(result);
+    // });
+
+    //  Rider Parcels API
+    app.get("/parcels/rider", verifyFBToken, async (req, res) => {
+      const { riderEmail, deliveryStatus } = req.query;
+      const query = {};
+
+      if (riderEmail) {
+        query.riderEmail = riderEmail;
+      }
+
+  
+      if (deliveryStatus) {
+        query.deliveryStatus = deliveryStatus;
+      } else {
+        query.deliveryStatus = { $nin: ["parcel_delivered", "rejected"] };
+      }
+
+      const cursor = parcelCollection.find(query);
+      const result = await cursor.toArray();
       res.send(result);
     });
 
-    app.patch(
-      "/users/:id/role",
-      verifyFBToken,
-      verifyAdminToken,
-      async (req, res) => {
-        const id = req.params.id;
+    // Rider Status Update API
+    app.patch("/parcels/:id/status", verifyFBToken, async (req, res) => {
+      try {
+        const { deliveryStatus, riderId, trackingId } = req.body;
+        const query = { _id: new ObjectId(req.params.id) };
 
-        const roleInfo = req.body;
-        const query = { _id: new ObjectId(id) };
+        const parcel = await parcelCollection.findOne(query);
+        if (!parcel) {
+          return res.status(404).send({ message: "Parcel not found" });
+        }
+
+        const activeTrackingId = trackingId || parcel.trackingId;
+
         const updateDoc = {
           $set: {
-            role: roleInfo.role,
+            deliveryStatus: deliveryStatus,
           },
         };
-        const result = await userCollection.updateOne(query, updateDoc);
+        const result = await parcelCollection.updateOne(query, updateDoc);
+
+        // পার্সেল ডেলিভারি হয়ে গেলে রাইডারকে 'available' করা
+        if (deliveryStatus === "parcel_delivered" && riderId) {
+          try {
+            await ridersCollection.updateOne(
+              { _id: new ObjectId(riderId) },
+              { $set: { workStatus: "available" } },
+            );
+          } catch (err) {
+            console.error("Rider status update failed:", err.message);
+          }
+        }
+
+        // `trackings` কালেকশনে টাইমলাইন সেভ করা
+        if (activeTrackingId) {
+          await logTracking(activeTrackingId, deliveryStatus);
+        }
+
         res.send(result);
-      },
-    );
+      } catch (error) {
+        console.error("Error updating status:", error);
+        res.status(500).send({ message: "Internal server error" });
+      }
+    });
+    // app.patch("/parcels/:id/status", verifyFBToken, async (req, res) => {
+    //   const { deliveryStatus, riderId, trackingId } = req.body;
+    //   const query = { _id: new ObjectId(req.params.id) };
+
+    //   const updateDoc = {
+    //     $set: {
+    //       deliveryStatus: deliveryStatus,
+    //     },
+    //   };
+
+    //   // riderId check
+    //   if (deliveryStatus === "parcel_delivered" && riderId) {
+    //     try {
+    //       const riderQuery = { _id: new ObjectId(riderId) };
+    //       const riderUpdatedDoc = {
+    //         $set: {
+    //           workStatus: "available",
+    //         },
+    //       };
+    //       await ridersCollection.updateOne(riderQuery, riderUpdatedDoc);
+    //     } catch (err) {
+    //       console.error("Failed to update rider status:", err.message);
+    //     }
+    //   }
+
+    //   const result = await parcelCollection.updateOne(query, updateDoc);
+    //   // log Tracking
+    //   log(trackingId, deliveryStatus)
+    //   res.send(result);
+    // });
 
     app.delete("/parcels/:id", async (req, res) => {
       const id = req.params.id;
@@ -319,6 +441,8 @@ async function run() {
 
         if (session.payment_status === "paid") {
           const resultPayment = await paymentCollection.insertOne(payment);
+
+          logTracking(trackingId, "pending-pickup");
           return res.send({
             success: true,
             modifyParcel: result,
