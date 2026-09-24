@@ -197,7 +197,7 @@ async function run() {
       const result = await parcelCollection.insertOne(parcel);
       res.send(result);
     });
-    
+
     // Admin Assign Rider Route
     app.patch("/parcels/:id", async (req, res) => {
       const id = req.params.id;
@@ -205,7 +205,6 @@ async function run() {
 
       const query = { _id: new ObjectId(id) };
 
-      
       const parcel = await parcelCollection.findOne(query);
       const activeTrackingId = trackingId || parcel?.trackingId;
 
@@ -270,7 +269,6 @@ async function run() {
         query.riderEmail = riderEmail;
       }
 
-  
       if (deliveryStatus) {
         query.deliveryStatus = deliveryStatus;
       } else {
@@ -302,7 +300,6 @@ async function run() {
         };
         const result = await parcelCollection.updateOne(query, updateDoc);
 
-        // পার্সেল ডেলিভারি হয়ে গেলে রাইডারকে 'available' করা
         if (deliveryStatus === "parcel_delivered" && riderId) {
           try {
             await ridersCollection.updateOne(
@@ -314,7 +311,7 @@ async function run() {
           }
         }
 
-        // `trackings` কালেকশনে টাইমলাইন সেভ করা
+        // `trackings`
         if (activeTrackingId) {
           await logTracking(activeTrackingId, deliveryStatus);
         }
@@ -533,6 +530,15 @@ async function run() {
         res.send(result);
       },
     );
+    // Get tracking history by trackingId
+    app.get("/trackings/:trackingId", async (req, res) => {
+      const { trackingId } = req.params;
+      const result = await trackingCollection
+        .find({ trackingId })
+        .sort({ createdAt: 1 }) 
+        .toArray();
+      res.send(result);
+    });
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
