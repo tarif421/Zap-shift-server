@@ -66,7 +66,7 @@ const trackingCollection = db.collection("trackings");
 const verifyFBToken = async (req, res, next) => {
   const token = req.headers.authorization;
 
-  if (!token) {
+  if (!token || !token.startsWith("Bearer ")) {
     return res.status(401).send({ message: "unauthorized access" });
   }
 
@@ -77,14 +77,19 @@ const verifyFBToken = async (req, res, next) => {
     next();
   } catch (error) {
     console.error("Firebase Auth Error:", error.message);
-    return res.status(401).send({ message: "forbidden access" });
+    return res.status(401).send({ message: "unauthorized access" });
   }
 };
 
-// Admin Verification Middleware
+// Admin Verification Middleware (Case-insensitive Fixed)
 const verifyAdminToken = async (req, res, next) => {
   const email = req.decoded_email;
-  const query = { email };
+  if (!email) {
+    return res.status(403).send({ message: "forbidden access" });
+  }
+
+  // Case-insensitive matching for email
+  const query = { email: { $regex: new RegExp(`^${email}$`, "i") } };
   const user = await userCollection.findOne(query);
 
   if (!user || user.role !== "admin") {
@@ -108,7 +113,7 @@ const logTracking = async (trackingId, status) => {
   }
 };
 
-// =================== ALL ROUTES (OUTSIDE RUN) ===================
+// =================== ALL ROUTES ===================
 
 // Root API
 app.get("/", (req, res) => {
@@ -133,7 +138,7 @@ app.get("/users", async (req, res) => {
 // Get User Role API
 app.get("/users/:email/role", async (req, res) => {
   const email = req.params.email;
-  const query = { email };
+  const query = { email: { $regex: new RegExp(`^${email}$`, "i") } };
   const user = await userCollection.findOne(query);
   res.send({ role: user?.role || "user" });
 });
@@ -143,7 +148,9 @@ app.post("/users", async (req, res) => {
   user.role = "user";
   user.createdAt = new Date();
   const email = user.email;
-  const userExists = await userCollection.findOne({ email });
+  const userExists = await userCollection.findOne({
+    email: { $regex: new RegExp(`^${email}$`, "i") },
+  });
 
   if (userExists) {
     return res.send({ message: "user exists" });
@@ -382,7 +389,9 @@ app.get("/riders", async (req, res) => {
 app.post("/riders", async (req, res) => {
   const rider = req.body;
   const email = rider.email;
-  const riderExists = await ridersCollection.findOne({ email });
+  const riderExists = await ridersCollection.findOne({
+    email: { $regex: new RegExp(`^${email}$`, "i") },
+  });
 
   if (riderExists) {
     return res.send({ message: "already applied" });
@@ -407,7 +416,10 @@ app.patch("/riders/:id/role", verifyFBToken, verifyAdminToken, async (req, res) 
 
   if (status === "approved") {
     const email = req.body.email;
-    await userCollection.updateOne({ email }, { $set: { role: "rider" } });
+    await userCollection.updateOne(
+      { email: { $regex: new RegExp(`^${email}$`, "i") } },
+      { $set: { role: "rider" } }
+    );
   }
 
   res.send(result);
@@ -423,7 +435,7 @@ app.get("/trackings/:trackingId", async (req, res) => {
   res.send(result);
 });
 
-// Connect Database before starting server (Local development)
+// Connect Database
 async function connectDB() {
   try {
     await client.connect();
