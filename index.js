@@ -1,6 +1,3 @@
-const dns = require("dns");
-dns.setServers(["8.8.8.8", "8.8.4.4"]);
-
 const express = require("express");
 const cors = require("cors");
 const app = express();
@@ -12,13 +9,15 @@ const admin = require("firebase-admin");
 
 const port = process.env.PORT || 3000;
 
+// Middleware
+app.use(express.json());
+app.use(cors());
+
 // Safe Firebase Admin Initialization
-// Safe Firebase Admin Initialization (Handles both Plain JSON & Base64)
 try {
   if (process.env.FB_SERVICE_KEY) {
     let serviceAccount;
 
-    // Normal JSON এবং Base64 দুটিই সেইফলি হ্যান্ডেল করার ট্রিক
     try {
       serviceAccount = JSON.parse(process.env.FB_SERVICE_KEY);
     } catch {
@@ -34,10 +33,10 @@ try {
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
       });
-      console.log(" Firebase Admin Initialized Successfully!");
+      console.log("✅ Firebase Admin Initialized Successfully!");
     }
   } else {
-    console.error(" process.env.FB_SERVICE_KEY পাওয়া যায়নি!");
+    console.error("❌ process.env.FB_SERVICE_KEY was not found!");
   }
 } catch (error) {
   console.error("Firebase Admin Initialization Error:", error.message);
@@ -60,10 +59,6 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   },
 });
-
-// Middleware
-app.use(express.json());
-app.use(cors());
 
 // Global Database Collections Setup
 const db = client.db("zap_shift_db");
@@ -92,21 +87,25 @@ const verifyFBToken = async (req, res, next) => {
   }
 };
 
-// Admin Verification Middleware (Case-insensitive Fixed)
+// Admin Verification Middleware
 const verifyAdminToken = async (req, res, next) => {
-  const email = req.decoded_email;
-  if (!email) {
-    return res.status(403).send({ message: "forbidden access" });
-  }
+  try {
+    const email = req.decoded_email;
+    if (!email) {
+      return res.status(403).send({ message: "forbidden access" });
+    }
 
-  // Case-insensitive matching for email
-  const query = { email: { $regex: new RegExp(`^${email}$`, "i") } };
-  const user = await userCollection.findOne(query);
+    const query = { email: { $regex: new RegExp(`^${email}$`, "i") } };
+    const user = await userCollection.findOne(query);
 
-  if (!user || user.role !== "admin") {
-    return res.status(403).send({ message: "forbidden access" });
+    if (!user || user.role !== "admin") {
+      return res.status(403).send({ message: "forbidden access" });
+    }
+    next();
+  } catch (error) {
+    console.error("Verify Admin Error:", error);
+    res.status(500).send({ message: "Internal server error" });
   }
-  next();
 };
 
 // Helper: Tracking Logger
@@ -133,116 +132,156 @@ app.get("/", (req, res) => {
 
 // User Related APIs
 app.get("/users", async (req, res) => {
-  const searchText = req.query.searchText;
-  const query = {};
-  if (searchText) {
-    query.$or = [
-      { displayName: { $regex: searchText,$options: "i" } },
-      { email: { $regex: searchText,$options: "i" } },
-    ];
+  try {
+    const searchText = req.query.searchText;
+    const query = {};
+    if (searchText) {
+      query.$or = [
+        { displayName: { $regex: searchText,$options: "i" } },
+        { email: { $regex: searchText,$options: "i" } },
+      ];
+    }
+    const cursor = userCollection.find(query).sort({ createdAt: -1 }).limit(5);
+    const result = await cursor.toArray();
+    res.send(result);
+  } catch (error) {
+    console.error("Error fetching users:", error);
+    res.status(500).send({ message: "Internal server error" });
   }
-  const cursor = userCollection.find(query).sort({ createdAt: -1 }).limit(5);
-  const result = await cursor.toArray();
-  res.send(result);
 });
 
 // Get User Role API
 app.get("/users/:email/role", async (req, res) => {
-  const email = req.params.email;
-  const query = { email: { $regex: new RegExp(`^${email}$`, "i") } };
-  const user = await userCollection.findOne(query);
-  res.send({ role: user?.role || "user" });
+  try {
+    const email = req.params.email;
+    const query = { email: { $regex: new RegExp(`^${email}$`, "i") } };
+    const user = await userCollection.findOne(query);
+    res.send({ role: user?.role || "user" });
+  } catch (error) {
+    console.error("Error getting user role:", error);
+    res.status(500).send({ message: "Internal server error" });
+  }
 });
 
 app.post("/users", async (req, res) => {
-  const user = req.body;
-  user.role = "user";
-  user.createdAt = new Date();
-  const email = user.email;
-  const userExists = await userCollection.findOne({
-    email: { $regex: new RegExp(`^${email}$`, "i") },
-  });
+  try {
+    const user = req.body;
+    user.role = "user";
+    user.createdAt = new Date();
+    const email = user.email;
+    const userExists = await userCollection.findOne({
+      email: { $regex: new RegExp(`^${email}$`, "i") },
+    });
 
-  if (userExists) {
-    return res.send({ message: "user exists" });
+    if (userExists) {
+      return res.send({ message: "user exists" });
+    }
+
+    const result = await userCollection.insertOne(user);
+    res.send(result);
+  } catch (error) {
+    console.error("Error saving user:", error);
+    res.status(500).send({ message: "Internal server error" });
   }
-
-  const result = await userCollection.insertOne(user);
-  res.send(result);
 });
 
 // Parcel APIs
 app.get("/parcels", async (req, res) => {
-  const query = {};
-  const { email, deliveryStatus } = req.query;
-  if (email) query.senderEmail = email;
-  if (deliveryStatus) query.deliveryStatus = deliveryStatus;
+  try {
+    const query = {};
+    const { email, deliveryStatus } = req.query;
+    if (email) query.senderEmail = email;
+    if (deliveryStatus) query.deliveryStatus = deliveryStatus;
 
-  const options = { sort: { createdAt: -1 } };
-  const cursor = parcelCollection.find(query, options);
-  const result = await cursor.toArray();
-  res.send(result);
+    const options = { sort: { createdAt: -1 } };
+    const cursor = parcelCollection.find(query, options);
+    const result = await cursor.toArray();
+    res.send(result);
+  } catch (error) {
+    console.error("Error fetching parcels:", error);
+    res.status(500).send({ message: "Internal server error" });
+  }
 });
 
 app.get("/parcels/rider", verifyFBToken, async (req, res) => {
-  const { riderEmail, deliveryStatus } = req.query;
-  const query = {};
+  try {
+    const { riderEmail, deliveryStatus } = req.query;
+    const query = {};
 
-  if (riderEmail) query.riderEmail = riderEmail;
-  if (deliveryStatus) {
-    query.deliveryStatus = deliveryStatus;
-  } else {
-    query.deliveryStatus = { $nin: ["parcel_delivered", "rejected"] };
+    if (riderEmail) query.riderEmail = riderEmail;
+    if (deliveryStatus) {
+      query.deliveryStatus = deliveryStatus;
+    } else {
+      query.deliveryStatus = { $nin: ["parcel_delivered", "rejected"] };
+    }
+
+    const cursor = parcelCollection.find(query);
+    const result = await cursor.toArray();
+    res.send(result);
+  } catch (error) {
+    console.error("Error fetching rider parcels:", error);
+    res.status(500).send({ message: "Internal server error" });
   }
-
-  const cursor = parcelCollection.find(query);
-  const result = await cursor.toArray();
-  res.send(result);
 });
 
 app.get("/parcels/:id", async (req, res) => {
-  const id = req.params.id;
-  const query = { _id: new ObjectId(id) };
-  const result = await parcelCollection.findOne(query);
-  res.send(result);
+  try {
+    const id = req.params.id;
+    const query = { _id: new ObjectId(id) };
+    const result = await parcelCollection.findOne(query);
+    res.send(result);
+  } catch (error) {
+    console.error("Error fetching parcel:", error);
+    res.status(500).send({ message: "Internal server error" });
+  }
 });
 
 app.post("/parcel", async (req, res) => {
-  const parcel = req.body;
-  parcel.createdAt = new Date();
-  const result = await parcelCollection.insertOne(parcel);
-  res.send(result);
+  try {
+    const parcel = req.body;
+    parcel.createdAt = new Date();
+    const result = await parcelCollection.insertOne(parcel);
+    res.send(result);
+  } catch (error) {
+    console.error("Error creating parcel:", error);
+    res.status(500).send({ message: "Internal server error" });
+  }
 });
 
 // Admin Assign Rider
 app.patch("/parcels/:id", async (req, res) => {
-  const id = req.params.id;
-  const { riderId, riderName, riderEmail, trackingId } = req.body;
+  try {
+    const id = req.params.id;
+    const { riderId, riderName, riderEmail, trackingId } = req.body;
 
-  const query = { _id: new ObjectId(id) };
-  const parcel = await parcelCollection.findOne(query);
-  const activeTrackingId = trackingId || parcel?.trackingId;
+    const query = { _id: new ObjectId(id) };
+    const parcel = await parcelCollection.findOne(query);
+    const activeTrackingId = trackingId || parcel?.trackingId;
 
-  const updatedDoc = {
-    $set: {
-      deliveryStatus: "driver_assign",
-      riderId,
-      riderName,
-      riderEmail,
-    },
-  };
-  const result = await parcelCollection.updateOne(query, updatedDoc);
+    const updatedDoc = {
+      $set: {
+        deliveryStatus: "driver_assign",
+        riderId,
+        riderName,
+        riderEmail,
+      },
+    };
+    const result = await parcelCollection.updateOne(query, updatedDoc);
 
-  const riderQuery = { _id: new ObjectId(riderId) };
-  await ridersCollection.updateOne(riderQuery, {
-    $set: { workStatus: "in_delivery" },
-  });
+    const riderQuery = { _id: new ObjectId(riderId) };
+    await ridersCollection.updateOne(riderQuery, {
+      $set: { workStatus: "in_delivery" },
+    });
 
-  if (activeTrackingId) {
-    await logTracking(activeTrackingId, "driver_assign");
+    if (activeTrackingId) {
+      await logTracking(activeTrackingId, "driver_assign");
+    }
+
+    res.send(result);
+  } catch (error) {
+    console.error("Error assigning rider:", error);
+    res.status(500).send({ message: "Internal server error" });
   }
-
-  res.send(result);
 });
 
 // Rider Status Update
@@ -284,166 +323,206 @@ app.patch("/parcels/:id/status", verifyFBToken, async (req, res) => {
 });
 
 app.delete("/parcels/:id", async (req, res) => {
-  const id = req.params.id;
-  const query = { _id: new ObjectId(id) };
-  const result = await parcelCollection.deleteOne(query);
-  res.send(result);
+  try {
+    const id = req.params.id;
+    const query = { _id: new ObjectId(id) };
+    const result = await parcelCollection.deleteOne(query);
+    res.send(result);
+  } catch (error) {
+    console.error("Error deleting parcel:", error);
+    res.status(500).send({ message: "Internal server error" });
+  }
 });
 
 // Payment APIs
 app.post("/create-cheackout-seassion", async (req, res) => {
-  const paymentInfo = req.body;
-  const amount = parseInt(paymentInfo.cost) * 100;
-  const session = await stripe.checkout.sessions.create({
-    line_items: [
-      {
-        price_data: {
-          currency: "usd",
-          unit_amount: amount,
-          product_data: { name: paymentInfo.parcelName },
+  try {
+    const paymentInfo = req.body;
+    const amount = parseInt(paymentInfo.cost) * 100;
+    const session = await stripe.checkout.sessions.create({
+      line_items: [
+        {
+          price_data: {
+            currency: "usd",
+            unit_amount: amount,
+            product_data: { name: paymentInfo.parcelName },
+          },
+          quantity: 1,
         },
-        quantity: 1,
+      ],
+      customer_email: paymentInfo.senderEmail,
+      mode: "payment",
+      metadata: {
+        parcelId: paymentInfo.parcelId,
+        parcelName: paymentInfo.parcelName,
       },
-    ],
-    customer_email: paymentInfo.senderEmail,
-    mode: "payment",
-    metadata: {
-      parcelId: paymentInfo.parcelId,
-      parcelName: paymentInfo.parcelName,
-    },
-    success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
-  });
+      success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
+    });
 
-  res.send({ url: session.url });
+    res.send({ url: session.url });
+  } catch (error) {
+    console.error("Error creating checkout session:", error);
+    res.status(500).send({ message: "Internal server error" });
+  }
 });
 
 app.patch("/payment-success", async (req, res) => {
-  const sessionId = req.query.session_id;
-  const session = await stripe.checkout.sessions.retrieve(sessionId);
+  try {
+    const sessionId = req.query.session_id;
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
 
-  const transactionId = session.payment_intent;
-  const query = { transactionId };
-  const paymentExist = await paymentCollection.findOne(query);
+    const transactionId = session.payment_intent;
+    const query = { transactionId };
+    const paymentExist = await paymentCollection.findOne(query);
 
-  if (paymentExist) {
-    return res.send({
-      message: "already exists",
-      transactionId,
-      trackingId: paymentExist.trackingId,
-    });
-  }
+    if (paymentExist) {
+      return res.send({
+        message: "already exists",
+        transactionId,
+        trackingId: paymentExist.trackingId,
+      });
+    }
 
-  const trackingId = generateTrackingId();
+    const trackingId = generateTrackingId();
 
-  if (session.payment_status === "paid") {
-    const id = session.metadata.parcelId;
-    const update = {
-      $set: {
-        paymentStatus: "paid",
-        deliveryStatus: "pending-pickup",
+    if (session.payment_status === "paid") {
+      const id = session.metadata.parcelId;
+      const update = {
+        $set: {
+          paymentStatus: "paid",
+          deliveryStatus: "pending-pickup",
+          trackingId,
+        },
+      };
+      const result = await parcelCollection.updateOne({ _id: new ObjectId(id) }, update);
+
+      const payment = {
+        amount: session.amount_total / 100,
+        currency: session.currency,
+        customerEmail: session.customer_email,
+        parcelId: session.metadata.parcelId,
+        parcelName: session.metadata.parcelName,
+        transactionId: session.payment_intent,
+        paymentStatus: session.payment_status,
+        paymentDate: new Date(),
         trackingId,
-      },
-    };
-    const result = await parcelCollection.updateOne({ _id: new ObjectId(id) }, update);
+      };
 
-    const payment = {
-      amount: session.amount_total / 100,
-      currency: session.currency,
-      customerEmail: session.customer_email,
-      parcelId: session.metadata.parcelId,
-      parcelName: session.metadata.parcelName,
-      transactionId: session.payment_intent,
-      paymentStatus: session.payment_status,
-      paymentDate: new Date(),
-      trackingId,
-    };
+      const resultPayment = await paymentCollection.insertOne(payment);
+      logTracking(trackingId, "pending-pickup");
 
-    const resultPayment = await paymentCollection.insertOne(payment);
-    logTracking(trackingId, "pending-pickup");
+      return res.send({
+        success: true,
+        modifyParcel: result,
+        trackingId,
+        paymentInfo: resultPayment,
+        transactionId: session.payment_intent,
+      });
+    }
 
-    return res.send({
-      success: true,
-      modifyParcel: result,
-      trackingId,
-      paymentInfo: resultPayment,
-      transactionId: session.payment_intent,
-    });
+    return res.send({ success: false, message: "Payment not verified" });
+  } catch (error) {
+    console.error("Error processing payment success:", error);
+    res.status(500).send({ message: "Internal server error" });
   }
-
-  return res.send({ success: false, message: "Payment not verified" });
 });
 
 app.get("/payments", async (req, res) => {
-  const email = req.query.email;
-  const query = {};
-  if (email) query.customerEmail = email;
+  try {
+    const email = req.query.email;
+    const query = {};
+    if (email) query.customerEmail = email;
 
-  const cursor = paymentCollection.find(query);
-  const result = await cursor.toArray();
-  res.send(result);
+    const cursor = paymentCollection.find(query);
+    const result = await cursor.toArray();
+    res.send(result);
+  } catch (error) {
+    console.error("Error fetching payments:", error);
+    res.status(500).send({ message: "Internal server error" });
+  }
 });
 
 // Riders APIs
 app.get("/riders", async (req, res) => {
-  const { status, districts, workStatus } = req.query;
-  const query = {};
-  if (status) query.status = status;
-  if (districts) query.districts = districts;
-  if (workStatus) query.workStatus = workStatus;
+  try {
+    const { status, districts, workStatus } = req.query;
+    const query = {};
+    if (status) query.status = status;
+    if (districts) query.districts = districts;
+    if (workStatus) query.workStatus = workStatus;
 
-  const cursor = ridersCollection.find(query);
-  const result = await cursor.toArray();
-  res.send(result);
+    const cursor = ridersCollection.find(query);
+    const result = await cursor.toArray();
+    res.send(result);
+  } catch (error) {
+    console.error("Error fetching riders:", error);
+    res.status(500).send({ message: "Internal server error" });
+  }
 });
 
 app.post("/riders", async (req, res) => {
-  const rider = req.body;
-  const email = rider.email;
-  const riderExists = await ridersCollection.findOne({
-    email: { $regex: new RegExp(`^${email}$`, "i") },
-  });
+  try {
+    const rider = req.body;
+    const email = rider.email;
+    const riderExists = await ridersCollection.findOne({
+      email: { $regex: new RegExp(`^${email}$`, "i") },
+    });
 
-  if (riderExists) {
-    return res.send({ message: "already applied" });
+    if (riderExists) {
+      return res.send({ message: "already applied" });
+    }
+
+    rider.status = "pending";
+    rider.createdAt = new Date();
+
+    const result = await ridersCollection.insertOne(rider);
+    res.send(result);
+  } catch (error) {
+    console.error("Error creating rider:", error);
+    res.status(500).send({ message: "Internal server error" });
   }
-
-  rider.status = "pending";
-  rider.createdAt = new Date();
-
-  const result = await ridersCollection.insertOne(rider);
-  res.send(result);
 });
 
 app.patch("/riders/:id/role", verifyFBToken, verifyAdminToken, async (req, res) => {
-  const status = req.body.status;
-  const id = req.params.id;
-  const query = { _id: new ObjectId(id) };
+  try {
+    const status = req.body.status;
+    const id = req.params.id;
+    const query = { _id: new ObjectId(id) };
 
-  const updateDoc = {
-    $set: { status, workStatus: "available" },
-  };
-  const result = await ridersCollection.updateOne(query, updateDoc);
+    const updateDoc = {
+      $set: { status, workStatus: "available" },
+    };
+    const result = await ridersCollection.updateOne(query, updateDoc);
 
-  if (status === "approved") {
-    const email = req.body.email;
-    await userCollection.updateOne(
-      { email: { $regex: new RegExp(`^${email}$`, "i") } },
-      { $set: { role: "rider" } }
-    );
+    if (status === "approved") {
+      const email = req.body.email;
+      await userCollection.updateOne(
+        { email: { $regex: new RegExp(`^${email}$`, "i") } },
+        { $set: { role: "rider" } }
+      );
+    }
+
+    res.send(result);
+  } catch (error) {
+    console.error("Error updating rider role:", error);
+    res.status(500).send({ message: "Internal server error" });
   }
-
-  res.send(result);
 });
 
 // Tracking API
 app.get("/trackings/:trackingId", async (req, res) => {
-  const { trackingId } = req.params;
-  const result = await trackingCollection
-    .find({ trackingId })
-    .sort({ createdAt: 1 })
-    .toArray();
-  res.send(result);
+  try {
+    const { trackingId } = req.params;
+    const result = await trackingCollection
+      .find({ trackingId })
+      .sort({ createdAt: 1 })
+      .toArray();
+    res.send(result);
+  } catch (error) {
+    console.error("Error fetching tracking:", error);
+    res.status(500).send({ message: "Internal server error" });
+  }
 });
 
 // Connect Database
