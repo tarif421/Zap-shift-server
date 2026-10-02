@@ -12,25 +12,39 @@ const port = process.env.PORT || 3000;
 
 const admin = require("firebase-admin");
 
-const serviceAccount = require("./zap-shift-cbd1a-firebase-adminsdk.json");
+// Safe Firebase Admin Initialization
+try {
+  if (process.env.FB_SERVICE_KEY) {
+    const decoded = Buffer.from(process.env.FB_SERVICE_KEY, "base64").toString("utf8");
+    const serviceAccount = JSON.parse(decoded);
 
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-});
+    // Fix escaped newlines in private key if present
+    if (serviceAccount.private_key) {
+      serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, "\n");
+    }
 
-//  tracking id
+    if (!admin.apps.length) {
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+      });
+    }
+  }
+} catch (error) {
+  console.error("Firebase Admin Initialization Error:", error.message);
+}
+
+// Tracking ID Generator
 const crypto = require("crypto");
-const { log } = require("console");
 
 function generateTrackingId() {
   const randomSet = crypto.randomBytes(3).toString("hex").toUpperCase();
-  const currentYear = new Date().getFullYear(); // 2026
+  const currentYear = new Date().getFullYear();
   return `ZAP-${currentYear}-${randomSet}`;
 }
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.9aos02c.mongodb.net/?appName=Cluster0`;
 
-// Create a MongoClient with a MongoClientOptions object to set the Stable API version
+// MongoClient configuration
 const client = new MongoClient(uri, {
   serverApi: {
     version: ServerApiVersion.v1,
@@ -535,7 +549,7 @@ async function run() {
       const { trackingId } = req.params;
       const result = await trackingCollection
         .find({ trackingId })
-        .sort({ createdAt: 1 }) 
+        .sort({ createdAt: 1 })
         .toArray();
       res.send(result);
     });
