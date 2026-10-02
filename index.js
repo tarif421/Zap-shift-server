@@ -15,11 +15,16 @@ const port = process.env.PORT || 3000;
 // Safe Firebase Admin Initialization
 try {
   if (process.env.FB_SERVICE_KEY) {
-    const decoded = Buffer.from(process.env.FB_SERVICE_KEY, "base64").toString("utf8");
+    const decoded = Buffer.from(process.env.FB_SERVICE_KEY, "base64").toString(
+      "utf8",
+    );
     const serviceAccount = JSON.parse(decoded);
 
     if (serviceAccount.private_key) {
-      serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, "\n");
+      serviceAccount.private_key = serviceAccount.private_key.replace(
+        /\\n/g,
+        "\n",
+      );
     }
 
     if (!admin.apps.length) {
@@ -67,6 +72,7 @@ const verifyFBToken = async (req, res, next) => {
   const token = req.headers.authorization;
 
   if (!token || !token.startsWith("Bearer ")) {
+    console.log("❌ Token Missing in Header!");
     return res.status(401).send({ message: "unauthorized access" });
   }
 
@@ -76,7 +82,7 @@ const verifyFBToken = async (req, res, next) => {
     req.decoded_email = decoded.email;
     next();
   } catch (error) {
-    console.error("Firebase Auth Error:", error.message);
+    console.error("❌ Firebase Token Verification Error:", error.message);
     return res.status(401).send({ message: "unauthorized access" });
   }
 };
@@ -126,8 +132,8 @@ app.get("/users", async (req, res) => {
   const query = {};
   if (searchText) {
     query.$or = [
-      { displayName: { $regex: searchText,$options: "i" } },
-      { email: { $regex: searchText,$options: "i" } },
+      { displayName: { $regex: searchText, $options: "i" } },
+      { email: { $regex: searchText, $options: "i" } },
     ];
   }
   const cursor = userCollection.find(query).sort({ createdAt: -1 }).limit(5);
@@ -254,7 +260,7 @@ app.patch("/parcels/:id/status", verifyFBToken, async (req, res) => {
       try {
         await ridersCollection.updateOne(
           { _id: new ObjectId(riderId) },
-          { $set: { workStatus: "available" } }
+          { $set: { workStatus: "available" } },
         );
       } catch (err) {
         console.error("Rider status update failed:", err.message);
@@ -334,7 +340,10 @@ app.patch("/payment-success", async (req, res) => {
         trackingId,
       },
     };
-    const result = await parcelCollection.updateOne({ _id: new ObjectId(id) }, update);
+    const result = await parcelCollection.updateOne(
+      { _id: new ObjectId(id) },
+      update,
+    );
 
     const payment = {
       amount: session.amount_total / 100,
@@ -404,26 +413,31 @@ app.post("/riders", async (req, res) => {
   res.send(result);
 });
 
-app.patch("/riders/:id/role", verifyFBToken, verifyAdminToken, async (req, res) => {
-  const status = req.body.status;
-  const id = req.params.id;
-  const query = { _id: new ObjectId(id) };
+app.patch(
+  "/riders/:id/role",
+  verifyFBToken,
+  verifyAdminToken,
+  async (req, res) => {
+    const status = req.body.status;
+    const id = req.params.id;
+    const query = { _id: new ObjectId(id) };
 
-  const updateDoc = {
-    $set: { status, workStatus: "available" },
-  };
-  const result = await ridersCollection.updateOne(query, updateDoc);
+    const updateDoc = {
+      $set: { status, workStatus: "available" },
+    };
+    const result = await ridersCollection.updateOne(query, updateDoc);
 
-  if (status === "approved") {
-    const email = req.body.email;
-    await userCollection.updateOne(
-      { email: { $regex: new RegExp(`^${email}$`, "i") } },
-      { $set: { role: "rider" } }
-    );
-  }
+    if (status === "approved") {
+      const email = req.body.email;
+      await userCollection.updateOne(
+        { email: { $regex: new RegExp(`^${email}$`, "i") } },
+        { $set: { role: "rider" } },
+      );
+    }
 
-  res.send(result);
-});
+    res.send(result);
+  },
+);
 
 // Tracking API
 app.get("/trackings/:trackingId", async (req, res) => {
